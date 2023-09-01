@@ -31,5 +31,8 @@
 *.out
 *.app
 
-# Executable folder contents
-bin/*
+# Executable folder
+bin
+
+# Object folder
+obj
