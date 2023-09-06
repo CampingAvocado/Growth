@@ -39,7 +39,7 @@ Comments in code are sparse and maybe even outdated and there is currently no us
 
 ### Plans v0.2
 #### Params
-Add parameter `int cellinfluencerad`  that determines in what radius a Cell should diminish its surrounding potential (whenever it does). Adjust `params.h:edgebufArray` to hold a custom buffer size of  `cellinfluencerad` (so cells on the boundary of the Grid can just keep writing to `edgebufArr potentialmap` without dealing with out of range issues.
+Add parameter `int cellinfluencerad`  that determines in what radius a Cell should diminish its surrounding potential (whenever it does). Adjust `params.h:edgebufArray` to hold a custom buffer size of  `cellinfluencerad` (so cells on the boundary of the Grid can just keep writing to `edgebufArr potentialmap` without dealing with out of range issues).
 #### Multiplication Algorithm:
 Store Cells on a Max-Heap (or priority list, same thing?) rather than a vector that sorts them by surrounding sum of potentials. All Cells stay alive so long as the surrounding potential isn't 0 (e.g. because the Cell is surrounded). Then the top X% of Cells are multiplied.
 This should make it less (im-?) possible for the growth to terminate early as it can regrow from any free cell.

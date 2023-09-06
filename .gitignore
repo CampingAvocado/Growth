@@ -36,3 +36,6 @@ bin
 
 # Object folder
 obj
+
+# Output files
+src/pfuncvals*
