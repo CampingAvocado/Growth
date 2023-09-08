@@ -4,19 +4,16 @@
 #include <vector>
 #include <fstream>
 /*
- * This File defines all runtime parameters/"global" objects,
- * most importantly the coordinate/potential grid (called potentialmap) that is
- * accessed by both ofApp and Cell(s)
+ * This File defines all runtime parameters & objects that need to accessed by all cells (global)
  */
 
-// todo: add foreground/background colors as parameters
-
-// Simple Wrapper Class for dynamic float arrays of 2 dimensions
-// that has a buffer: accesses which are out of range by 1 return buf
-// - Not Copyable
-// - Not Assignable
-// - Not Movable
-// - Not Copy-Assignable
+/* Simple Wrapper Class for dynamic float arrays of 2 dimensions
+ * that has a buffer: accesses which are out of range by bufsize return buf
+ * Not Copyable
+ * Not Assignable
+ * Not Movable
+ * Not Copy-Assignable
+ */
 template <typename T>
 class edgebufArr {
 	public:
@@ -57,30 +54,37 @@ class edgebufArr {
 		}
 
 		// Only Read-Access: use operator() on a const ref of class
-		// to call this function instead (for safety of not overwriting buffer)
+		// to call this function instead (for safety)
 		T& operator()(int i, int j) const {
 			return arr_[(i+bufsize_)*sizey_ + (j+bufsize_)];
 		}
 
+		// Return size of 1st dimension of array
 		int sizex() {
 			return sizex_ - 2 * bufsize_;
 		}
 
+		// Return size of 2nd dimension of array
 		int sizey() {
 			return sizey_ - 2 * bufsize_;
 		}
-	
+		
+		// Return total size
 		int size() {
 			return sizex() * sizey();
 		}
 
 	private:
-		T* arr_;
-		const int sizex_;
-		const int sizey_;
-		const int bufsize_;
+		T* arr_;			 // Underlying array
+		const int sizex_;	 // size in first dim (incl. buffer!)
+		const int sizey_;	 // size in second dim (incl. buffer!)
+		const int bufsize_;	 // size of buffer in all directions
 };
 
+/*
+ * Creates a 2D Vector if int pairs that hold the indices of a pixelated circle from
+ * inner radius r0 to (including) radius r using the Bresenham Algorithm
+ */
 class circleindices {
 	public:
 		// Generate indices of concentric pixelated circles around (0,0) with radius r
@@ -90,18 +94,20 @@ class circleindices {
 				throw std::runtime_error("circleindices got invalid radii args");
 			}
 			indices.resize(r - r0 + 1);
-			edgebufArr<bool> logger(r, r, 1, true);
+			edgebufArr<bool> logger(r, r, 1, true); // used to detect the holes 
+													// (missing index pairs between concentric circles)
 
 			std::vector<std::pair<int, int>> tmp;
 			if (r0 > 0) midpcircledraw_(r0 - 1, logger); // log one more circle inwards for holefill
 			for (unsigned i = 0; i <= r - r0 ; i++) {
-				tmp = midpcircledraw_(i + r0, logger);
+				tmp = midpcircledraw_(i + r0, logger); // Get circle indices
 				
 				for (unsigned j = 0; j < tmp.size(); j++) {
 					auto xy = tmp[j];
 					int x = xy.first, y = xy.second;
 
-					// indices (Anti-)Symmetric across quadrants
+					// midpcircledraw_ only provides indices of positive quadrant but
+					// indices are (Anti-)Symmetric across quadrants
 					indices[i].push_back({x, y});
 					indices[i].push_back({-x, y});
 					indices[i].push_back({-x, -y});
@@ -178,11 +184,15 @@ class circleindices {
 		}
 };
 
+
+/*
+ * Stores run-time parameters. defined once as global object for all other objects to reference.
+ * Not designed for anything else (copying etc.)
+ */
 class parameters {
 	public:
 		parameters() : initcellcoords(numinitcells),
-					   potentialmap(gridsizex, gridsizey, celldeterrad,
-					  		std::make_pair(ofVec2f(0., 0.), 0.f)),
+					   potentialmap(gridsizex, gridsizey, celldeterrad, 0.f), // is an edgebufArr so needs a calue to fill buffer
 					   cind(circleindices(2, celldeterrad).indices) {
 			if ((windowwidth % pixelsize != 0)
 				|| (windowheight % pixelsize != 0)) {
@@ -190,6 +200,7 @@ class parameters {
 					"params.h:pixelsize does not divide window into homogenous grid"
 				);
 			}
+
 
 			// Set up potentialmap to carry coordinate grid and potentials of cells
 			std::ofstream pfuncvals("../src/pfuncvals.csv"); // to view for debugging purposes
@@ -200,66 +211,74 @@ class parameters {
 					// Translate the vec as potential func should be defined on [-1, 1]^2
 					ofVec2f translated = maptocoordsys(coord);
 					float pval = potentialfunc(translated);
-					potentialmap(i, j) = std::make_pair(coord, pval);
+					if (pval < 0.) throw  std::runtime_error("potentialfunc gave a negative value!");
+					potentialmap(i, j) = pval;
 					pfuncvals << pval << ",";
-					coord.y += pixelsize;
+					coord.y += 1;
 				}
 				pfuncvals << "\n";
-				coord.x += pixelsize;
+				coord.x += 1;
 			}
 
-			// Define set of first cells
-			// Note that here the coordinate Grid is the standard one, i.e.
-			// [0, windowwidth] x [0, windowheight]
-			// hence use maptogrid as needed
-			for (int i = 0; i < numinitcells; i++) {
-				initcellcoords[i] = {
-					windowwidth/2 - (numinitcells-1 + i)*pixelsize,
-					windowheight - pixelsize
-				}; // replace with some expression as needed
-			}
+			initcells();
 		}
 
-		// Maps vectors from [0, windowwidth] x [0, windowheight] to [-1, 1]^2 
+		// Maps vectors from [0, gridsizex] x [0, gridsizey] to [-1, 1]^2 
 		ofVec2f maptocoordsys(ofVec2f coord) {
-			return (coord - ofVec2f(0.5*(windowwidth-1), 0.5*(windowheight-1))) / ofVec2f(0.5*(windowwidth-1), -0.5*(windowheight-1));
+			return (coord - ofVec2f(0.5*(gridsizex-1), 0.5*(gridsizey-1)))
+					/ ofVec2f(0.5*(gridsizex-1), -0.5*(gridsizey-1));
 		}
 
-		// Maps vectors from [-1, 1]^2 to [0, windowwidth] x [0, windowheight]
+		// Maps vectors from [-1, 1]^2 to [0, gridsizex] x [0, gridsizey]
 		ofVec2f maptogrid(ofVec2f coord) {
-			return coord * ofVec2f(0.5*(windowwidth-1), -0.5*(windowheight-1)) + ofVec2f(0.5*(windowwidth-1), 0.5*(windowheight));
+			return coord * ofVec2f(0.5*(gridsizex-1), -0.5*(gridsizey-1))
+				   + ofVec2f(0.5*(gridsizex-1), 0.5*(gridsizey));
 		}
 
 		// RUNTIME PARAMETERS
-		// ******Set these*******
+		// ******Set these**********************************************************************************
 
-		// Potential Function for PotentialMap,
+		// Potential Function for potentialmap,
 		// should be STRICTLY POSITIVE and DEFINED ON [-1, 1]^2
 		float potentialfunc(ofVec2f& pos) {
 			float x = pos.x, y = pos.y;
 			return 0.5*(y + 1.);
 		}
 
-		const int windowwidth = 800; // in pixels
-		const int windowheight = 800; // in pixels
-		const int pixelsize = 4; // size of  cell
-		const int numinitcells = 1; // inital number of cells
-		const int stride = 1; // how many multiplications per frame, adjusts speed
-		const int celldeterrad = 10; // radius in which a cell diminishes potential >= 2 if it should exist
-		const int cellattractrad = 2; // radius in which a cell increases potential >= 2 if it should exist
-		const int celldeterage = 3;
-		const float celldeterfactor = 0.9; // the smaller, the more a cell of age celldeterage
-											 // will try and keep cells of distance [2, celldeterrad]
-											 // away, IN [0, 1]
-		const float cellattractfactor = 10.;
-		std::vector<ofVec2f> initcellcoords; // Set Contents in Ctor
-		// *****************
+		const int windowwidth = 800;	   	 // in pixels
+		const int windowheight = 800;	   	 // in pixels
+		const int pixelsize = 4; 		   	 // size of cell in pixels
+		const int numinitcells = 1; 	   	 // inital number of cells, should match
+		const int stride = 1; 			   	 // how many multiplications per frame, adjusts speed
+		const int celldeterrad = 10; 	   	 // radius in which a cell diminishes potential >= 2 if it should exist
+		const int cellattractrad = 2; 	   	 // radius in which a cell increases potential >= 2 if it should exist
+		const int celldeterage = 3;			 // age at which cell diminishes farther potential
+		const float celldeterfactor = 0.9; 	 // the smaller, the more a cell of age celldeterage
+										   	 // will try and keep cells of distance [2, celldeterrad]
+										   	 // away, should be in  [0, 1]
+		const float cellattractfactor = 10.; // Same as celldeterfactor only increases potential instead (at creation)
+											 // should be larger (or equal if no attraction) than 1
+
+		std::vector<ofVec2f> initcellcoords; // Set Contents here:
+		inline void initcells() {
+		// Define set of first cells
+			// Note that here coordinates are in 
+			// [0, gridsizex] x [0, gridsizey]
+			// hence use maptogrid as needed
+			for (int i = 0; i < numinitcells; i++) {
+				initcellcoords[i] = {
+					gridsizex/2 - (numinitcells-1 + i),
+					gridsizey - 1
+				}; // replace with some expression as needed
+			}
+		}
+		// **************************************************************************************************
 
 		// Set automatically
-		const int gridsizex = windowwidth/pixelsize;
-		const int gridsizey = windowheight/pixelsize;
+		const int gridsizex = windowwidth/pixelsize;  		// Cells see the coordinate Grid [0, gridsizex] x [0, gridsizey],
+		const int gridsizey = windowheight/pixelsize; 		// same dimension as the potentialmap. This means Cells have integer coords
 		const std::vector<
 			std::vector<std::pair<int, int>>
-		> cind;
-		edgebufArr<std::pair<ofVec2f, float>> potentialmap;
+		> cind;										  		// Relevant indices for pixelated circle
+		edgebufArr<float> potentialmap; 					// Stores potential on Grid [0, gridsizex] x [0, gridsizey]
 };

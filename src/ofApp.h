@@ -10,45 +10,51 @@
 #include <vector>
 #include <functional>  // for sort function
 
-extern parameters params; // global parameters
+extern parameters params; // run-time parameters and objects
 
+/*
+ * The basic living Entity on Grid [0, girdsizex] x [0, gridsizey].
+ * Can look at neighboring potential, influence potential in a radius up to cellattractrad and celldeterrad,
+ * and multiply (i.e. spawn a Cell) in one of the neighboring Pixels on the Grid.
+ * Nothing outside of the provided Ctor is intended behaviour (no copy, assign etc.)
+ */
 class Cell {
 
 	// Nasty types
 	using cell_shrptr = std::shared_ptr<Cell>;
 
 	public:
+		// Ctor
 		Cell(int i, int j) : potentialmap_(params.potentialmap),
 							 i_(i),
 							 j_(j),
-							 pos_(potentialmap_(i, j).first),
 							 neighborpot_(4) {
 			if (i_ >= gridsizex_ || j_ >= gridsizey_ || i_ < 0 || j_ < 0) {
 				throw std::runtime_error("Spawned a Cell out of bounds!");
 			}
 			// Set the potential to zero (no Cell can overlap another)
-			potentialmap_(i_, j_).second = 0.;
-			// get surrounding potential info
-			surveyandfactor_(cellattractfac_);
-			// Attract nearby neighbors
+			potentialmap_(i_, j_) = 0.;
+			// get neighboring potential info and attract direct neighbors (increase potenital)
+			factor_(cellattractfac_);
+			// Attract nearby neighbors beyond direct ones (optional, off if cellattractrad_ < 2)
 			attractfartherneighbors_(cellattractfac_, cellattractrad_);
-			sumpot_ = computesumpot_();
 			// Draw itself
 			draw();
 		}
 
-		Cell(ofVec2f pos) : Cell(pos.x/params.pixelsize, pos.y/params.pixelsize) {}
+		Cell(ofVec2f pos) : Cell(pos.x, pos.y) {}
 
 		~Cell() = default; // pot. todo: remove pixel upon destruct.
-
-		ofVec2f getpos() {
-			return pos_;
-		}
 		
+		// Get sum of potential around cell
 		float getsumpot() {
 			return sumpot_;
 		}
 
+		// Computes the sum of potentials
+		// and thereby deternmines if it can still multiply (non-zero potential)
+		// Should be called before multiply()!
+		// Also takes care of potential-manipulation (deter) and ages cell
 		bool canmultiply() {
 			age_++;
 			if (age_ == celldeterage_) { // discourage  other cells to spawn next to an old cell
@@ -61,6 +67,8 @@ class Cell {
 			return sumpot_ > 0.;
 		}
 
+		// Multiplies Cell, returning a shard_ptr to the new one. Decides location based on probability dist.
+		// relative to neighboring potentials
 		cell_shrptr multiply() {
 			if (sumpot_ <= 0.) {
 				throw std::runtime_error("tried to multiply a cell that supposedly has no free neighbor pixels, sumpot = " 
@@ -110,6 +118,8 @@ class Cell {
 		}
 	
 	private:
+
+		// weight function for probability dist., optional
 		inline float pot_(float f) {
 			return f;
 		}
@@ -122,69 +132,78 @@ class Cell {
 			);
 		}
 
+		// Gather neighboring potential
 		inline void survey_() {
-			neighborpot_[0] = potentialmapreadonly_(i_+1, j_).second; // right
-			neighborpot_[1] = potentialmapreadonly_(i_, j_-1).second; // above
-			neighborpot_[2] = potentialmapreadonly_(i_-1, j_).second; // left
-			neighborpot_[3] = potentialmapreadonly_(i_, j_+1).second; // below
+			neighborpot_[0] = potentialmapreadonly_(i_+1, j_); // right
+			neighborpot_[1] = potentialmapreadonly_(i_, j_-1); // above
+			neighborpot_[2] = potentialmapreadonly_(i_-1, j_); // left
+			neighborpot_[3] = potentialmapreadonly_(i_, j_+1); // below
 		}
 
-		inline void surveyandfactor_(float f) {
-			// survey surrounding potentials (note that out of bounds is allowed by neighborpot_)
-			// and adjust potential around cell
-			neighborpot_[0] = (potentialmap_(i_+1, j_).second *= f); // right
-			neighborpot_[1] = (potentialmap_(i_, j_-1).second *= f); // above
-			neighborpot_[2] = (potentialmap_(i_-1, j_).second *= f); // left
-			neighborpot_[3] = (potentialmap_(i_, j_+1).second *= f); // below
+		// factor neighboring potential by f (for direct attraction)
+		// Note that f should be larger than 1 to work
+		inline void factor_(float f) {
+			// (note that out of bounds is allowed by neighborpot_)
+			potentialmap_(i_+1, j_) *= f; // right
+			potentialmap_(i_, j_-1) *= f; // above
+			potentialmap_(i_-1, j_) *= f; // left
+			potentialmap_(i_, j_+1) *= f; // below
 		}
 
-		// note that rad < 2 does nothing
+		// lower potential farther than direct neighbor Pixels by a
+		// Linearly increasing (with radius) factor f in [0, 1]
+		// note that rad < 2 does nothing and f should be in [0, 1] !
 		inline void deterfartherneighbors_(float f, int rad) {
 			// lower potential further around the cell in a circle
 			for (int i = 0; i <= rad - 2; i++) {
 				for (const auto& ij : cind_[i]) {
-					potentialmap_(ij.first + i_, ij.second + j_).second *= f * (i + 2.) / rad;
+					potentialmap_(ij.first + i_, ij.second + j_) *= f * (i + 2.) / rad;
 				}
 			}
 		}
 
+		// increase potential farther than direct neighbor Pixels by a
+		// Linearly increasing (with radius) factor f in [1, inf]
+		// note that rad < 2 does nothing and f should be in [1, inf] !
 		// note that rad < 2 does nothing
 		inline void attractfartherneighbors_(float f, int rad) {
 			// lower potential further around the cell in a circle
 			for (int i = 0; i <= rad - 2; i++) {
 				for (const auto& ij : cind_[i]) {
-					potentialmap_(ij.first + i_, ij.second + j_).second *= f * (rad - i) / rad;
+					potentialmap_(ij.first + i_, ij.second + j_) *= f * (rad - i) / rad;
 				}
 			}
 		}
 
 		inline void draw() {
-			ofDrawRectangle(pos_, pixelsize_, pixelsize_);
+			ofDrawRectangle(i_*pixelsize_, j_*pixelsize_,
+							pixelsize_, pixelsize_
+			); // pixelsize mult. translates from standard Cell grid [0, gridsizex] x [0, gridsizey] to
+			   // what OF uses: [0, windowwidth] x [0, windowheight] 
 		}
 
 		// grab parameters form params.h
+		const int pixelsize_ = params.pixelsize;
 		const int gridsizex_ = params.gridsizex;
 		const int gridsizey_ = params.gridsizey;
-		const int pixelsize_ = params.pixelsize;
+		const int celldeterage_ = params.celldeterage;
 		const unsigned celldeterrad_ = params.celldeterrad;
 		const unsigned cellattractrad_ = params.cellattractrad;
-		const int celldeterage_ = params.celldeterage;
 		const float celldeterfac_ = params.celldeterfactor;
 		const float cellattractfac_ = params.cellattractfactor;
-		edgebufArr<std::pair<ofVec2f, float>>& potentialmap_; // reference to potential map in params.h
-		const edgebufArr<std::pair<ofVec2f, float>>& potentialmapreadonly_
+		edgebufArr<float>& potentialmap_; // reference to potential map in params.h
+		const edgebufArr<float>& potentialmapreadonly_
 			= params.potentialmap; // const reference for readonly access (safety)
 		const std::vector<
 			std::vector<std::pair<int, int>>
 		>& cind_ = params.cind; // vector array of indices for a pixelated circle
 
 		// own member vars
-		int age_ = 0;
-		const int i_;
-		const int j_;
-		const ofVec2f pos_;
-		std::vector<float> neighborpot_;
-		float sumpot_;
+		int age_ = 0;						// Cell age determines at what point it deters farther neighbors (rad > 1)
+		const int i_;						// Cell has position [i, j] on
+		const int j_;						// Grid [0, gridsizex] x [0, gridsizey]
+		std::vector<float> neighborpot_;	// Cell stores neighbor potential vals here
+		float sumpot_;						// sum over nerighborpot_
 };
 
 class ofApp : public ofBaseApp{
@@ -215,15 +234,17 @@ class ofApp : public ofBaseApp{
 		cellptr_2arg_functional cellptrless_ = [](cell_shrptr a, cell_shrptr b) {
 			return a->getsumpot() < b->getsumpot();
 		};
-		std::vector<cell_shrptr> activecells_;
-		ofFbo fbo_;
+		std::vector<cell_shrptr> activecells_;  // vector of shared_ptrs to cells being managed.
+												// Cells with 0 sumpot_ get deleted off this vector
+		ofFbo fbo_;								// buffer, see doc
 
 		// grab parameters form params.h
 		const int windowwidth_ = params.windowwidth;
 		const int windowheight_ = params.windowheight;
 		const int numinitcells_ = params.numinitcells;
 		std::vector<ofVec2f>& initcellcoords_ = params.initcellcoords;
-		edgebufArr<std::pair<ofVec2f, float>>& potentialmap_
+		edgebufArr<float>& potentialmap_
 			= params.potentialmap; // reference to potential map in params.h
 		const int stride_ = params.stride;
+		const int pixelsize_ = params.pixelsize;
 };

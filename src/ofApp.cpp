@@ -17,8 +17,8 @@ void ofApp::setup(){
     fbo_.allocate(windowwidth_, windowheight_);
     fbo_.begin();
     ofClear(0);
+    
     // Get initial cells
-
     for (auto coord : initcellcoords_) {
         cell_shrptr newcell(new Cell(coord));
         activecells_.push_back(newcell);
@@ -43,6 +43,7 @@ void ofApp::update(){
 		// 	}
         //     ofExit();
         // }
+        
         // Erase cells that cannot multiply
         // (i.e. 0 surr. potential, typically because all neighbor pixels occupied)
         unsigned cnt = 0;
