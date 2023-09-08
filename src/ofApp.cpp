@@ -1,6 +1,7 @@
 #include "ofApp.h"
 #include <algorithm>
 #include <iostream> // todo: remove once all works
+#include <fstream>
 
 //--------------------------------------------------------------
 void ofApp::setup(){
@@ -16,49 +17,67 @@ void ofApp::setup(){
     fbo_.allocate(windowwidth_, windowheight_);
     fbo_.begin();
     ofClear(0);
+    
     // Get initial cells
-    cellvec_.reserve(numinitcells_);
-    for (int i = 0; i < numinitcells_; i++) {
-        cellvec_.push_back(std::shared_ptr<Cell>(
-            new Cell(initcellcoords_[i])
-        ));
+    for (auto coord : initcellcoords_) {
+        cell_shrptr newcell(new Cell(coord));
+        activecells_.push_back(newcell);
     }
     fbo_.end();
 }
 
 //--------------------------------------------------------------
 void ofApp::update(){
-    // ofLogNotice() << ofGetFrameRate();
     fbo_.begin();
-        for (int s = 0; s < stride_; s++) {
-        // sort cells by surrounding potential (decreasing order)
-        std::sort(cellvec_.begin(), cellvec_.end(),
-                    [](std::shared_ptr<Cell> a, std::shared_ptr<Cell> b) {
-                        return a->getsumpot() > b->getsumpot();
-                    }
-        );
-        // only keep top todo% Cells with most surr. potential
-        cellvec_.erase(cellvec_.end() - cellvec_.size()/4, cellvec_.end());
+    for (int s = 0; s < stride_; s++) {
+        ofLogNotice() << "# of active cells: " << activecells_.size();
 
-        // remove cells that have no adjacent empty pixels
-        cellvec_.erase(
-            std::remove_if(cellvec_.begin(), cellvec_.end(),
-                [](std::shared_ptr<Cell> cell) {
-                    return !cell->canmultiply();
-                }
-            ),
-            cellvec_.end()
-        );
-
-        std::vector<std::shared_ptr<Cell>> newcells;
-
-        std::for_each(cellvec_.begin(), cellvec_.end(),
-            [&newcells](std::shared_ptr<Cell> cell) {
-                newcells.push_back(cell->multiply());
-            }
-        );
-        cellvec_.insert(cellvec_.end(), newcells.begin(), newcells.end());
+        // Output Potential values for debugging purposes
+        // if (activecells_.size() == 0) {
+        //     std::ofstream os("../src/pfuncvalsend.csv");
+        //     for (int j = 0; j < potentialmap_.sizey(); j++) {
+		// 		for (int i = 0; i < potentialmap_.sizex(); i++) {
+		// 			os << potentialmap_(i, j).second << ",";
+		// 		}
+		// 		os << "\n";
+		// 	}
+        //     ofExit();
+        // }
         
+        // Erase cells that cannot multiply
+        // (i.e. 0 surr. potential, typically because all neighbor pixels occupied)
+        unsigned cnt = 0;
+        unsigned sizepre = activecells_.size();
+        activecells_.erase(std::remove_if(activecells_.begin(),
+                                        activecells_.end(),
+                                        [&cnt](cell_shrptr c) {
+                                                bool b = !c->canmultiply();
+                                                if (b) cnt++;
+                                                return b;
+                                        }
+                                        ),
+                        activecells_.end()
+        );
+
+        if (activecells_.size() == 0) {
+            fbo_.end();
+            return;
+        }
+
+        if (activecells_.size() + cnt != sizepre) {
+            throw std::runtime_error("Counted more dead Cells than were deleted!");
+        }
+
+
+        // Multiply Cells with highest potential
+        std::vector<cell_shrptr> newcells;
+        std::sort(activecells_.begin(), activecells_.end(), cellptrless_);
+        int cursizered = std::min((unsigned)activecells_.size(), (unsigned)activecells_.size()/2u + 1);
+        for (int i = 0; i < cursizered; i++) {
+            ofLogNotice() << "multiplying cell " << i+1;
+            cell_shrptr newcell = activecells_[i]->multiply();
+            activecells_.push_back(newcell);
+        }
     }
     fbo_.end();
 }
