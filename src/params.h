@@ -192,8 +192,8 @@ class circleindices {
 class parameters {
 	public:
 		parameters() : initcellcoords(numinitcells),
-					   potentialmap(gridsizex, gridsizey, celldeterrad, 0.f), // is an edgebufArr so needs a calue to fill buffer
-					   cind(circleindices(2, celldeterrad).indices) {
+					   cind(circleindices(2, celldeterrad).indices),
+					   potentialmap(gridsizex, gridsizey, celldeterrad, 0.f) { // is an edgebufArr so needs a calue to fill buffer
 			if ((windowwidth % pixelsize != 0)
 				|| (windowheight % pixelsize != 0)) {
 				throw std::runtime_error(
@@ -241,8 +241,7 @@ class parameters {
 		// Potential Function for potentialmap,
 		// should be STRICTLY POSITIVE and DEFINED ON [-1, 1]^2
 		float potentialfunc(ofVec2f& pos) {
-			float x = pos.x, y = pos.y;
-			return 0.5*(y + 1.);
+			return 0.5*(pos.y + 1.);
 		}
 
 		const int windowwidth = 800;	   	 // in pixels
@@ -267,8 +266,8 @@ class parameters {
 			// hence use maptogrid as needed
 			for (int i = 0; i < numinitcells; i++) {
 				initcellcoords[i] = {
-					gridsizex/2 - (numinitcells-1 + i),
-					gridsizey - 1
+					gridsizex/2.f - (numinitcells-1.f + i),
+					gridsizey - 1.f
 				}; // replace with some expression as needed
 			}
 		}
